@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kiro-proxy/config"
+	"kiro-proxy/logger"
 
 	"github.com/google/uuid"
 )
@@ -167,8 +168,12 @@ func performKiroWebSearch(ctx context.Context, account *config.Account, query st
 	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if !config.IsAPIKeyAccount(account) {
-		if _, err := resolveProfileArnContext(reqCtx, account); err != nil && !isProfileArnResolutionSoftError(err) {
-			return nil, err
+		//! Same degradation as chat (ensureRestProfileArn): Builder ID accounts answer the profile lookup with 400 yet work without an ARN.
+		if _, err := resolveProfileArnContext(reqCtx, account); err != nil {
+			if ctxErr := reqCtx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			logger.Debugf("[ProfileArn] Web search continuing without profile ARN for %s: %v", accountEmailForLog(account), err)
 		}
 	}
 
