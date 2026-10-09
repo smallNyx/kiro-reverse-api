@@ -13,26 +13,36 @@ func resolveAdapterThinking(current bool, thinking *ClaudeThinkingConfig, effort
 }
 
 func (h *Handler) adapterModelSchema(model string) map[string]interface{} {
+	schema, _ := h.adapterModelSchemaState(model)
+	return schema
+}
+
+// listed reports whether the model appears in the loaded listing. A listed
+// model without a schema accepts no native fields; an unlisted one is unknown.
+func (h *Handler) adapterModelSchemaState(model string) (schema map[string]interface{}, listed bool) {
 	h.modelsCacheMu.RLock()
 	defer h.modelsCacheMu.RUnlock()
 	for _, entry := range h.cachedModels {
 		if strings.EqualFold(entry.ModelId, model) {
-			return entry.AdditionalModelRequestFieldsSchema
+			return entry.AdditionalModelRequestFieldsSchema, true
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // Match native model schemas rather than sending Claude-specific fields to
 // every model. Explicit native fields/effort remain intact; enabled budgets
 // use the same effort ranges as the reference manager (Kiro has no budget knob).
 func (h *Handler) applyAdapterThinking(payload *KiroPayload, model string, thinking *ClaudeThinkingConfig, effort string) {
-	schema := h.adapterModelSchema(model)
+	schema, listed := h.adapterModelSchemaState(model)
 	properties, _ := schema["properties"].(map[string]interface{})
 	// The first request can precede the background model listing. Preserve
 	// requested native controls during a cold cache, as the reference adapter
 	// does, instead of silently reverting to a fixed legacy prompt budget.
-	if len(properties) == 0 {
+	// A listed model without a schema (e.g. haiku-4.5) rejects
+	// additionalModelRequestFields outright, so none are sent and thinking
+	// falls back to the legacy prompt.
+	if len(properties) == 0 && !listed {
 		if strings.HasPrefix(strings.ToLower(model), "gpt-") {
 			properties = map[string]interface{}{"reasoning": map[string]interface{}{}}
 		} else {

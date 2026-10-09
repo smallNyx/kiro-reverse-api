@@ -239,6 +239,36 @@ func TestAdapterColdModelCacheKeepsNativeThinking(t *testing.T) {
 	}
 }
 
+func TestAdapterListedModelWithoutSchemaGetsNoNativeFields(t *testing.T) {
+	h := &Handler{cachedModels: []ModelInfo{
+		{ModelId: "claude-haiku-4.5"},
+		{ModelId: "claude-opus-5.5", AdditionalModelRequestFieldsSchema: map[string]interface{}{"properties": map[string]interface{}{"thinking": map[string]interface{}{}, "output_config": map[string]interface{}{}}}},
+	}}
+	request := &ClaudeRequest{Model: "claude-haiku-4.5", System: "RULE", Thinking: &ClaudeThinkingConfig{Type: "enabled", BudgetTokens: 2048}, Messages: []ClaudeMessage{{Role: "user", Content: "hi"}}}
+	payload := ClaudeToKiro(request, true)
+	h.applyAdapterThinking(payload, request.Model, request.Thinking, "")
+	if len(payload.AdditionalModelRequestFields) != 0 {
+		t.Fatalf("schema-less model received native fields: %+v", payload.AdditionalModelRequestFields)
+	}
+	if !strings.HasPrefix(payload.ConversationState.History[0].UserInputMessage.Content, ThinkingModePrompt) {
+		t.Fatal("legacy thinking prompt dropped for schema-less model")
+	}
+
+	opus := &ClaudeRequest{Model: "claude-opus-5.5", Thinking: &ClaudeThinkingConfig{Type: "adaptive"}, Messages: []ClaudeMessage{{Role: "user", Content: "hi"}}}
+	payload = ClaudeToKiro(opus, true)
+	h.applyAdapterThinking(payload, opus.Model, opus.Thinking, "")
+	if payload.AdditionalModelRequestFields["thinking"].(map[string]interface{})["type"] != "adaptive" {
+		t.Fatal("schema-bearing model lost native thinking")
+	}
+
+	unlisted := &ClaudeRequest{Model: "claude-opus-6", Thinking: &ClaudeThinkingConfig{Type: "adaptive"}, Messages: []ClaudeMessage{{Role: "user", Content: "hi"}}}
+	payload = ClaudeToKiro(unlisted, true)
+	h.applyAdapterThinking(payload, unlisted.Model, unlisted.Thinking, "")
+	if payload.AdditionalModelRequestFields["thinking"] == nil {
+		t.Fatal("unlisted model must keep cold-cache native thinking")
+	}
+}
+
 func TestAdapterNativeThinkingWithoutSystemHasNoEmptyHistory(t *testing.T) {
 	h := &Handler{}
 	request := &OpenAIRequest{Model: "gpt-5.6-sol", ReasoningEffort: "low", Messages: []OpenAIMessage{{Role: "user", Content: "CODE"}}}
