@@ -226,7 +226,11 @@ func isBuilderIDProfileUnsupportedError(account *config.Account, err error) bool
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "HTTP 403") && strings.Contains(msg, "AWS Builder ID is not supported for this operation")
+	if strings.Contains(msg, "HTTP 403") && strings.Contains(msg, "AWS Builder ID is not supported for this operation") {
+		return true
+	}
+	// A malformed profile lookup is the same dead end for Builder ID accounts.
+	return strings.Contains(msg, "HTTP 400") && (strings.Contains(msg, "REQUEST_BODY_INVALID") || strings.Contains(msg, "Improperly formed request"))
 }
 
 func isProfileArnResolutionSoftError(err error) bool {
@@ -360,7 +364,10 @@ func listKiroProfiles(ctx context.Context, account *config.Account, region strin
 	nextToken := ""
 	//! Pages are bounded so a misbehaving upstream cannot loop forever.
 	for page := 0; page < maxProfilePages; page++ {
-		requestBody := map[string]interface{}{"maxResults": 50}
+		// maxResults is not in this operation's schema. Sending it makes Kiro
+		// return HTTP 400, which hides the Builder ID 403 the caller already treats
+		// as "no profile ARN, keep serving".
+		requestBody := map[string]interface{}{}
 		if nextToken != "" {
 			requestBody["nextToken"] = nextToken
 		}
